@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Cloud Inventory Manager Dashboard</title>
+  <link rel="stylesheet" href="/styles.css"/>
+  <style>
+    .metrics3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+    .metrics4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+    .section-title{margin:0 0 12px 0;color:var(--ci-navy)}
+    .leader-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:18px;margin-bottom:18px}
+    .leader-item{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #e6eef5}
+    .leader-item:last-child{border-bottom:none}
+    .rank{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:999px;background:#ebf8fc;border:1px solid #caeef7;color:#05647e;font-weight:700;margin-right:10px}
+    .name-wrap{display:flex;align-items:center}
+    .score-big{font-size:28px;font-weight:700;color:var(--ci-navy)}
+    .subtle{color:var(--ci-muted);font-size:12px}
+    .chip{display:inline-block;padding:4px 8px;border-radius:999px;background:#ebf8fc;border:1px solid #caeef7;color:#05647e;font-size:12px;margin:2px 4px 2px 0}
+    .chip-ready{background:#DCFCE7;border-color:#b7e9c6;color:#166534}
+    .chip-almost{background:#FEF3C7;border-color:#f7df9d;color:#92400E}
+    .chip-not{background:#FEE2E2;border-color:#f4c5c5;color:#991B1B}
+    .table-wrap{overflow:auto}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th,td{padding:10px;border-bottom:1px solid #e6eef5;text-align:left;vertical-align:top}
+    th{color:var(--ci-navy);position:sticky;top:0;background:white}
+    .badge-good{background:#DCFCE7;color:#166534;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700}
+    .badge-mid{background:#FEF3C7;color:#92400E;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700}
+    .badge-low{background:#FEE2E2;color:#991B1B;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700}
+    @media (max-width:980px){
+      .metrics3,.metrics4,.leader-grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+<div class="topbar">
+  <div class="wrap">
+    <div class="hero">
+      <div class="brand">
+        <img src="/assets/cloudinventory-logo-negative.png" alt="Cloud Inventory"/>
+        <div>
+          <h1 style="margin:0 0 6px 0;">Manager Dashboard v2</h1>
+          <div style="color:#dbe9f4;">Performance insights, readiness tracking, and leaderboard view for managers only.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="wrap">
+
+    <div class="metrics4">
+      <div class="card metric"><div class="label">BDRs tracked</div><div id="m-bdrs" class="value">-</div></div>
+      <div class="card metric"><div class="label">Total events</div><div id="m-events" class="value">-</div></div>
+      <div class="card metric"><div class="label">Top training need</div><div id="m-need" class="value" style="font-size:20px;">-</div></div>
+      <div class="card metric"><div class="label">Avg transition readiness</div><div id="m-ready" class="value" style="font-size:20px;">-</div></div>
+    </div>
+
+    <div class="leader-grid">
+      <div class="card">
+        <h2 class="section-title">Leaderboard</h2>
+        <div class="subtle" style="margin-bottom:10px;">Weighted toward average score, transition readiness, and practice volume.</div>
+        <div id="leaderboard"></div>
+      </div>
+      <div class="card">
+        <h2 class="section-title">Coaching Priorities</h2>
+        <div id="coach-priorities"></div>
+      </div>
+    </div>
+
+    <div class="metrics3">
+      <div class="card">
+        <div class="label">Most transition-ready BDR</div>
+        <div id="best-ready" class="score-big">-</div>
+        <div id="best-ready-sub" class="subtle"></div>
+      </div>
+      <div class="card">
+        <div class="label">Most improved opportunity</div>
+        <div id="most-active" class="score-big">-</div>
+        <div id="most-active-sub" class="subtle"></div>
+      </div>
+      <div class="card">
+        <div class="label">Strongest average score</div>
+        <div id="best-score" class="score-big">-</div>
+        <div id="best-score-sub" class="subtle"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">BDR Performance Detail</h2>
+      <div class="table-wrap">
+        <table id="table">
+          <thead>
+            <tr>
+              <th>BDR</th>
+              <th>Turns</th>
+              <th>Summaries</th>
+              <th>Avg score</th>
+              <th>Transition readiness</th>
+              <th>Coaching status</th>
+              <th>Most common question types</th>
+              <th>Top weaknesses / training needs</th>
+              <th>Most practiced scenarios</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function safeNum(n){ return typeof n === 'number' && !isNaN(n) ? n : 0; }
+function scoreBadge(avg){
+  if(avg >= 80) return '<span class="badge-good">Strong</span>';
+  if(avg >= 65) return '<span class="badge-mid">Developing</span>';
+  return '<span class="badge-low">Needs Coaching</span>';
+}
+function readinessCounts(obj){
+  obj = obj || {};
+  const ready = safeNum(obj.ready);
+  const almost = safeNum(obj.almost_ready);
+  const notReady = safeNum(obj.not_ready);
+  const total = ready + almost + notReady;
+  return {ready, almost, notReady, total};
+}
+function readinessPercent(obj){
+  const c = readinessCounts(obj);
+  if(!c.total) return 0;
+  return Math.round(((c.ready + c.almost * 0.5) / c.total) * 100);
+}
+function leaderboardScore(row){
+  const avg = safeNum(row.avg_score);
+  const turns = safeNum(row.turns);
+  const readyPct = readinessPercent(row.transition_readiness);
+  const volumeBonus = Math.min(turns, 20);
+  return Math.round(avg * 0.55 + readyPct * 0.35 + volumeBonus * 0.5);
+}
+function chipForReadiness(label, count){
+  const cls = label === 'ready' ? 'chip-ready' : label === 'almost_ready' ? 'chip-almost' : 'chip-not';
+  const text = label === 'almost_ready' ? 'almost ready' : label.replace('_',' ');
+  return `<span class="chip ${cls}">${text} (${count})</span>`;
+}
+function renderPriorities(rows){
+  const weaknessCounts = {};
+  rows.forEach(row => {
+    (row.top_weaknesses || []).forEach(([k,v]) => weaknessCounts[k] = (weaknessCounts[k] || 0) + v);
+  });
+  const top = Object.entries(weaknessCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const box = document.getElementById('coach-priorities');
+  if(!top.length){
+    box.innerHTML = '<div class="subtle">No coaching data yet.</div>';
+    return;
+  }
+  box.innerHTML = top.map(([k,v], idx) => `
+    <div class="leader-item">
+      <div class="name-wrap"><span class="rank">${idx+1}</span><div>${k}</div></div>
+      <div>${v}</div>
+    </div>
+  `).join('');
+  document.getElementById('m-need').textContent = top[0][0];
+}
+function renderLeaderboard(rows){
+  const ranked = [...rows].sort((a,b)=>leaderboardScore(b)-leaderboardScore(a));
+  const box = document.getElementById('leaderboard');
+  if(!ranked.length){
+    box.innerHTML = '<div class="subtle">No rep activity yet.</div>';
+    return;
+  }
+  box.innerHTML = ranked.map((row, idx) => `
+    <div class="leader-item">
+      <div class="name-wrap">
+        <span class="rank">${idx+1}</span>
+        <div>
+          <div><strong>${row.bdr_name}</strong></div>
+          <div class="subtle">Avg ${row.avg_score ?? '-'} / Ready ${readinessPercent(row.transition_readiness)}%</div>
+        </div>
+      </div>
+      <div><strong>${leaderboardScore(row)}</strong></div>
+    </div>
+  `).join('');
+
+  const bestReady = [...rows].sort((a,b)=>readinessPercent(b.transition_readiness)-readinessPercent(a.transition_readiness))[0];
+  const mostActive = [...rows].sort((a,b)=>safeNum(b.turns)-safeNum(a.turns))[0];
+  const bestScore = [...rows].sort((a,b)=>safeNum(b.avg_score)-safeNum(a.avg_score))[0];
+
+  if(bestReady){
+    document.getElementById('best-ready').textContent = bestReady.bdr_name;
+    document.getElementById('best-ready-sub').textContent = `Transition readiness ${readinessPercent(bestReady.transition_readiness)}%`;
+  }
+  if(mostActive){
+    document.getElementById('most-active').textContent = mostActive.bdr_name;
+    document.getElementById('most-active-sub').textContent = `${mostActive.turns} turns completed`;
+  }
+  if(bestScore){
+    document.getElementById('best-score').textContent = bestScore.bdr_name;
+    document.getElementById('best-score-sub').textContent = `Average score ${bestScore.avg_score ?? '-'}/100`;
+  }
+}
+async function loadData(){
+  const r = await fetch('/api/manager-data');
+  const data = await r.json();
+  const rows = data.rows || [];
+
+  document.getElementById('m-bdrs').textContent = rows.length;
+  document.getElementById('m-events').textContent = data.event_count ?? 0;
+
+  let readinessTotal = 0;
+  rows.forEach(row => readinessTotal += readinessPercent(row.transition_readiness));
+  document.getElementById('m-ready').textContent = rows.length ? `${Math.round(readinessTotal / rows.length)}%` : '-';
+
+  renderLeaderboard(rows);
+  renderPriorities(rows);
+
+  const tbody = document.querySelector('#table tbody');
+  tbody.innerHTML = '';
+  rows.forEach(row => {
+    const rc = readinessCounts(row.transition_readiness);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${row.bdr_name}</strong></td>
+      <td>${row.turns}</td>
+      <td>${row.summaries}</td>
+      <td>${row.avg_score ?? '-'}<div style="margin-top:6px;">${scoreBadge(safeNum(row.avg_score))}</div></td>
+      <td>
+        ${chipForReadiness('ready', rc.ready)}
+        ${chipForReadiness('almost_ready', rc.almost)}
+        ${chipForReadiness('not_ready', rc.notReady)}
+        <div class="subtle" style="margin-top:6px;">Readiness score: ${readinessPercent(row.transition_readiness)}%</div>
+      </td>
+      <td>${scoreBadge(safeNum(row.avg_score))}</td>
+      <td>${(row.question_types || []).map(x => `<span class="chip">${x[0]} (${x[1]})</span>`).join('') || '-'}</td>
+      <td>${(row.top_weaknesses || []).map(x => `<div>${x[0]} (${x[1]})</div>`).join('') || '-'}</td>
+      <td>${(row.scenarios || []).map(x => `<div>${x[0]} (${x[1]})</div>`).join('') || '-'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+loadData();
+</script>
+</body>
+</html>
