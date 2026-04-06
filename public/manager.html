@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Cloud Inventory Manager Dashboard</title>
+  <link rel="stylesheet" href="/styles.css"/>
+</head>
+<body>
+<div class="topbar">
+  <div class="wrap">
+    <div class="hero">
+      <div class="brand">
+        <img src="/assets/cloudinventory-logo-negative.png" alt="Cloud Inventory"/>
+        <div>
+          <h1 style="margin:0 0 6px 0;">Manager Dashboard</h1>
+          <div style="color:#dbe9f4;">Review BDR activity, average scores, common weaknesses, and training focus areas.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="wrap">
+    <div class="metrics" style="grid-template-columns:repeat(3,1fr);">
+      <div class="card metric"><div class="label">BDRs tracked</div><div id="m-bdrs" class="value">-</div></div>
+      <div class="card metric"><div class="label">Total events</div><div id="m-events" class="value">-</div></div>
+      <div class="card metric"><div class="label">Top training need</div><div id="m-need" class="value" style="font-size:20px;">-</div></div>
+    </div>
+    <div class="card">
+      <table id="table">
+        <thead>
+          <tr>
+            <th>BDR</th>
+            <th>Turns</th>
+            <th>Summaries</th>
+            <th>Avg score</th>
+            <th>Most common question types</th>
+            <th>Top weaknesses / training needs</th>
+            <th>Most practiced scenarios</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<script>
+async function loadData(){
+  const r = await fetch('/api/manager-data');
+  const data = await r.json();
+  document.getElementById('m-bdrs').textContent = data.rows.length;
+  document.getElementById('m-events').textContent = data.event_count;
+  const weaknessCounts = {};
+  const tbody = document.querySelector('#table tbody');
+  tbody.innerHTML = '';
+  data.rows.forEach(row => {
+    (row.top_weaknesses || []).forEach(([k,v]) => weaknessCounts[k] = (weaknessCounts[k] || 0) + v);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${row.bdr_name}</strong></td>
+      <td>${row.turns}</td>
+      <td>${row.summaries}</td>
+      <td>${row.avg_score ?? '-'}</td>
+      <td>${(row.question_types || []).map(x => `<span class="chip">${x[0]} (${x[1]})</span>`).join('') || '-'}</td>
+      <td>${(row.top_weaknesses || []).map(x => `<div>${x[0]} (${x[1]})</div>`).join('') || '-'}</td>
+      <td>${(row.scenarios || []).map(x => `<div>${x[0]} (${x[1]})</div>`).join('') || '-'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  const sortedNeeds = Object.entries(weaknessCounts).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('m-need').textContent = sortedNeeds.length ? sortedNeeds[0][0] : '-';
+}
+loadData();
+</script>
+</body>
+</html>
