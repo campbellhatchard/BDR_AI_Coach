@@ -1,4 +1,10 @@
-require('dotenv').config();
+// Load environment variables if dotenv is installed. In some environments
+// dotenv may not be available; wrap in try/catch to avoid runtime crash.
+try {
+  require('dotenv').config();
+} catch (err) {
+  // Ignore missing dotenv module; environment variables will remain undefined.
+}
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -33,6 +39,35 @@ const SCENARIOS = [
   {label:"Difficult to Train New Staff", opening:"It takes too long to get new people up to speed.", vertical:"Warehouse Operations", persona:"Director of Operations"},
   {label:"Integration Challenges", opening:"Our systems don't always work well together.", vertical:"Supply Chain Operations", persona:"IT Director"}
 ];
+
+/**
+ * Categorize a weakness text into a high level training theme.
+ * Themes help group similar improvement suggestions so that
+ * the manager dashboard can surface overall coaching priorities.
+ *
+ * The matching heuristics below look for keywords related to
+ * quantification (frequency, volume, how many), root cause probing
+ * (process, system, tool, underlying), meeting timing (transition or
+ * meeting), question quality (question phrasing, open ended),
+ * impact emphasis (impact or business), and everything else as other.
+ *
+ * @param {string} text The weakness text from the AI feedback.
+ * @returns {string} A theme identifier
+ */
+function categorizeWeakness(text) {
+  const t = String(text || '').toLowerCase();
+  // quantification: asking about numbers, size or scale
+  if (/frequency|volume|how many|how much|how often|quantify/.test(t)) return 'quantification';
+  // root cause probing: operational causes, processes, systems, tools, underlying issues
+  if (/process|system|tool|underlying|root|cause|operational|probe/.test(t)) return 'root_cause_probing';
+  // meeting timing: transitions to meeting or premature meeting requests
+  if (/transition|meeting|book a meeting|move to meeting/.test(t)) return 'meeting_timing';
+  // question quality: asking open ended questions versus statements or assumptions
+  if (/question|open\s*ended|assume|assumption|statement|not a question/.test(t)) return 'question_quality';
+  // impact emphasis: exploring business impact or why it matters
+  if (/impact|business|effect|cost/.test(t)) return 'impact';
+  return 'other';
+}
 
 function loadData() {
   try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); }
@@ -249,18 +284,106 @@ app.get('/api/manager-data', (req, res) => {
       row.summaries += 1;
     }
   }
-  const rows = Object.entries(byBdr).map(([bdr_name, row]) => ({
-    bdr_name,
-    turns: row.turns,
-    summaries: row.summaries,
-    avg_score: row.scores.length ? Math.round((row.scores.reduce((a,b)=>a+b,0)/row.scores.length) * 10) / 10 : null,
-    question_types: Object.entries(row.questionTypes).sort((a,b)=>b[1]-a[1]),
-    top_weaknesses: Object.entries(row.weaknesses).sort((a,b)=>b[1]-a[1]).slice(0,5),
-    scenarios: Object.entries(row.scenarios).sort((a,b)=>b[1]-a[1]).slice(0,5),
-    transition_readiness: row.readiness,
-    difficulties: row.difficulties
-  })).sort((a,b)=> (b.avg_score || 0) - (a.avg_score || 0));
+  const rows = Object.entries(byBdr).map(([bdr_name, row]) => {
+    // calculate average score on a 1–10 scale
+    const avg = row.scores.length ? Math.round((row.scores.reduce((a,b)=>a+b,0) / row.scores.length) * 10) / 10 : null;
+    // compute theme counts by grouping weaknesses
+    const themeCounts = {};
+    Object.entries(row.weaknesses).forEach(([weak, count]) => {
+      const theme = categorizeWeakness(weak);
+      themeCounts[theme] = (themeCounts[theme] || 0) + count;
+    });
+    return {
+      bdr_name,
+      turns: row.turns,
+      summaries: row.summaries,
+      avg_score: avg,
+      question_types: Object.entries(row.questionTypes).sort((a,b)=>b[1]-a[1]),
+      top_weaknesses: Object.entries(row.weaknesses).sort((a,b)=>b[1]-a[1]).slice(0,5),
+      scenarios: Object.entries(row.scenarios).sort((a,b)=>b[1]-a[1]).slice(0,5),
+      transition_readiness: row.readiness,
+      difficulties: row.difficulties,
+      themes: Object.entries(themeCounts).sort((a,b)=>b[1]-a[1])
+    };
+  }).sort((a,b)=> (b.avg_score || 0) - (a.avg_score || 0));
   res.json({ rows, event_count: events.length });
+});
+
+// Aggregate scenario distribution across all turn events.
+// Returns an array of [scenario_label, count] sorted descending by count.
+app.get('/api/scenario-distribution', (req, res) => {
+  const events = (loadData().events || []);
+  const counts = {};
+  for (const ev of events) {
+    if (ev.type === 'turn') {
+      const label = ev.scenario_label || 'Unknown';
+      counts[label] = (counts[label] || 0) + 1;
+    }
+  }
+  const scenarios = Object.entries(counts).sort((a,b) => b[1] - a[1]);
+  res.json({ scenarios });
+});
+
+// Aggregate training needs into high-level themes across all turn events.
+// Returns an array of [theme, count] sorted descending by count.
+app.get('/api/training-theme-distribution', (req, res) => {
+  const events = (loadData().events || []);
+  const themeCounts = {};
+  for (const ev of events) {
+    if (ev.type === 'turn' && Array.isArray(ev.weaknesses)) {
+      for (const weak of ev.weaknesses) {
+        const theme = categorizeWeakness(weak);
+        themeCounts[theme] = (themeCounts[theme] || 0) + 1;
+      }
+    }
+  }
+  const themes = Object.entries(themeCounts).sort((a,b) => b[1] - a[1]);
+  res.json({ themes });
+});
+
+// Provide detailed data for a given BDR. The BDR name must be URL encoded.
+// Returns JSON with arrays of scores, readiness counts, question types, scenarios,
+// strengths, and weaknesses aggregated for the specified rep.
+app.get('/api/bdr/:name', (req, res) => {
+  const rawName = req.params.name || '';
+  // decode URI component because names may contain spaces
+  const bdrName = decodeURIComponent(rawName);
+  const events = (loadData().events || []).filter(ev => (ev.bdr_name || 'Unknown') === bdrName);
+  const scores = [];
+  const readiness = {};
+  const questionTypes = {};
+  const scenarios = {};
+  const strengths = {};
+  const weaknesses = {};
+  for (const ev of events) {
+    if (ev.type === 'turn') {
+      if (typeof ev.score === 'number') scores.push(Number(ev.score));
+      const ready = ev.transition_readiness || 'not_ready';
+      readiness[ready] = (readiness[ready] || 0) + 1;
+      for (const qt of (ev.question_type_detected || [])) {
+        questionTypes[qt] = (questionTypes[qt] || 0) + 1;
+      }
+      for (const s of (ev.strengths || [])) {
+        strengths[s] = (strengths[s] || 0) + 1;
+      }
+      for (const w of (ev.weaknesses || [])) {
+        weaknesses[w] = (weaknesses[w] || 0) + 1;
+      }
+      const scen = ev.scenario_label || 'Unknown';
+      scenarios[scen] = (scenarios[scen] || 0) + 1;
+    }
+  }
+  // build sorted arrays for front-end consumption
+  const resp = {
+    name: bdrName,
+    scores,
+    readiness,
+    question_types: Object.entries(questionTypes).sort((a,b)=>b[1]-a[1]),
+    scenarios: Object.entries(scenarios).sort((a,b)=>b[1]-a[1]),
+    strengths: Object.entries(strengths).sort((a,b)=>b[1]-a[1]).slice(0,10),
+    weaknesses: Object.entries(weaknesses).sort((a,b)=>b[1]-a[1]).slice(0,10)
+  };
+  res.json(resp);
 });
 
 app.get('/manager', (req, res) => res.sendFile(path.join(__dirname, 'public', 'manager.html')));
