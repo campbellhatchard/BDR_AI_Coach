@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Cloud Inventory Manager Dashboard</title>
+  <link rel="stylesheet" href="/styles.css"/>
+  <!-- Import Chart.js for charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    .metrics3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+    .metrics4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+    .section-title{margin:0 0 12px 0;color:var(--ci-navy)}
+    .leader-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:18px;margin-bottom:18px}
+    .leader-item{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #e6eef5}
+    .leader-item:last-child{border-bottom:none}
+    .rank{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:999px;background:#ebf8fc;border:1px solid #caeef7;color:#05647e;font-weight:700;margin-right:10px}
+    .name-wrap{display:flex;align-items:center}
+    .score-big{font-size:28px;font-weight:700;color:var(--ci-navy)}
+    .subtle{color:var(--ci-muted);font-size:12px}
+    .chip{display:inline-block;padding:4px 8px;border-radius:999px;background:#ebf8fc;border:1px solid #caeef7;color:#05647e;font-size:12px;margin:2px 4px 2px 0}
+    .chip-ready{background:#DCFCE7;border-color:#b7e9c6;color:#166534}
+    .chip-almost{background:#FEF3C7;border-color:#f7df9d;color:#92400E}
+    .chip-not{background:#FEE2E2;border-color:#f4c5c5;color:#991B1B}
+    .table-wrap{overflow:auto}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th,td{padding:10px;border-bottom:1px solid #e6eef5;text-align:left;vertical-align:top}
+    th{color:var(--ci-navy);position:sticky;top:0;background:white}
+    .badge-good{background:#DCFCE7;color:#166534;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700}
+    .badge-mid{background:#FEF3C7;color:#92400E;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700}
+    .badge-low{background:#FEE2E2;color:#991B1B;padding:6px 10px;border-radius:999px;font-size:12px;font-weight:700}
+
+    /* Layout for the top charts: display the scenario and training theme cards side by side */
+    #top-charts.chart-row{
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(250px, 1fr));
+      gap:12px;
+      /* create clear space above and below the charts row */
+      margin:32px 0; /* extra top margin separates charts from the header */
+    }
+
+    /* Grid layout for the detail charts in the BDR modal (2x2) */
+    .detail-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
+      gap:12px;
+      margin-bottom:16px;
+    }
+    .detail-grid h3{
+      font-size:14px;
+      margin:0 0 6px 0;
+      color:var(--ci-navy);
+    }
+    /* Styles for interaction list in modal */
+    #detail-interactions{
+      max-height:280px;
+      overflow-y:auto;
+      border:1px solid #e6eef5;
+      padding:8px;
+      background:#f8fbfd;
+      margin-top:8px;
+      font-size:13px;
+    }
+    .interaction-item{
+      padding:6px 0;
+      border-bottom:1px solid #e6eef5;
+    }
+    .interaction-item:last-child{border-bottom:none;}
+    .interaction-item .scenario{
+      font-weight:600;
+      color:var(--ci-navy);
+      display:block;
+      margin-bottom:2px;
+    }
+    .interaction-item .response{
+      margin-left:0;
+      display:block;
+      color:var(--ci-muted);
+      margin-bottom:4px;
+    }
+    .interaction-item .meta{
+      font-size:12px;
+      color:var(--ci-muted);
+      margin-left:0;
+      display:block;
+    }
+    /* Tooltip styles */
+    .info-icon {
+      display:inline-block;
+      margin-left:4px;
+      width:16px;
+      height:16px;
+      text-align:center;
+      line-height:16px;
+      border-radius:50%;
+      background:#e6eef5;
+      color:#05647e;
+      font-size:12px;
+      cursor:default;
+    }
+    .info-icon[data-title]:hover::after {
+      content: attr(data-title);
+      position:absolute;
+      background:#fff;
+      border:1px solid #c5d7e8;
+      padding:6px 10px;
+      border-radius:4px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.15);
+      white-space:pre-line;
+      z-index:1000;
+      color:#083f5b;
+      max-width:260px;
+      font-size:12px;
+      transform:translate(-50%, -120%);
+    }
+    /* Modal styles for BDR drill‑down */
+    #bdr-modal {
+      display:none;
+      position:fixed;
+      top:0;
+      left:0;
+      width:100%;
+      height:100%;
+      background:rgba(0,0,0,0.4);
+      z-index:2000;
+      align-items:center;
+      justify-content:center;
+    }
+    #bdr-modal .modal-content {
+      background:#fff;
+      padding:20px;
+      border-radius:8px;
+      width:90%;
+      max-width:900px;
+      max-height:90%;
+      overflow:auto;
+      position:relative;
+    }
+    #bdr-modal .close-btn {
+      position:absolute;
+      top:10px;
+      right:10px;
+      background:none;
+      border:none;
+      font-size:20px;
+      cursor:pointer;
+      color:#666;
+    }
+    .chart-container {
+      margin:20px 0;
+    }
+    @media (max-width:980px){
+      .metrics3,.metrics4,.leader-grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+<div class="topbar">
+  <div class="wrap">
+    <div class="hero">
+      <div class="brand">
+        <img src="/assets/cloudinventory-logo-negative.png" alt="Cloud Inventory"/>
+        <div>
+          <h1 style="margin:0 0 6px 0;">Manager Dashboard v2</h1>
+          <div style="color:#dbe9f4;">Performance insights, readiness tracking, and leaderboard view for managers only.</div>
+        </div>
+      </div>
+    </div>
+    <!-- Charts section for scenario diversity and training themes -->
+    <div id="top-charts" class="chart-row">
+      <div class="card">
+        <h2 class="section-title">Scenario Diversity<span class="info-icon" data-title="Distribution of scenarios attempted across all reps"></span></h2>
+        <div class="chart-container">
+          <!-- Limit the height to approximately 2 inches (≈160px) -->
+          <canvas id="scenarioChart" height="160"></canvas>
+        </div>
+      </div>
+      <div class="card">
+        <h2 class="section-title">Training Need Themes<span class="info-icon" data-title="Weaknesses grouped by theme (e.g., root‑cause probing, quantification, tools/processes, meeting timing, question quality)"></span></h2>
+        <div class="chart-container">
+          <canvas id="themeChart" height="160"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="wrap">
+
+    <div class="metrics4">
+      <div class="card metric"><div class="label">BDRs tracked<span class="info-icon" data-title="Number of unique reps recorded in the dataset"></span></div><div id="m-bdrs" class="value">-</div></div>
+      <div class="card metric"><div class="label">Total events<span class="info-icon" data-title="Sum of all recorded turns and summaries"></span></div><div id="m-events" class="value">-</div></div>
+      <div class="card metric"><div class="label">Top training need<span class="info-icon" data-title="The most frequently surfaced weakness across all reps"></span></div><div id="m-need" class="value" style="font-size:20px;">-</div></div>
+      <div class="card metric"><div class="label">Avg transition readiness<span class="info-icon" data-title="Weighted readiness: ready=1, almost ready=0.5, not ready=0"></span></div><div id="m-ready" class="value" style="font-size:20px;">-</div></div>
+    </div>
+
+    <div class="leader-grid">
+      <div class="card">
+        <h2 class="section-title">Leaderboard<span class="info-icon" data-title="Reps are ranked using a weighted score: average score (55%), readiness (35%) and practice volume (10%)"></span></h2>
+        <div class="subtle" style="margin-bottom:10px;">Weighted toward average score, transition readiness, and practice volume.</div>
+        <div id="leaderboard"></div>
+      </div>
+      <div class="card">
+        <h2 class="section-title">Coaching Priorities<span class="info-icon" data-title="Most frequent weaknesses grouped by theme"></span></h2>
+        <div id="coach-priorities"></div>
+      </div>
+    </div>
+
+    <div class="metrics3">
+      <div class="card">
+        <div class="label">Most transition-ready BDR<span class="info-icon" data-title="Rep with highest readiness percentage"></span></div>
+        <div id="best-ready" class="score-big">-</div>
+        <div id="best-ready-sub" class="subtle"></div>
+      </div>
+      <div class="card">
+        <div class="label">Most improved opportunity<span class="info-icon" data-title="Rep with highest number of practice turns"></span></div>
+        <div id="most-active" class="score-big">-</div>
+        <div id="most-active-sub" class="subtle"></div>
+      </div>
+      <div class="card">
+        <div class="label">Strongest average score<span class="info-icon" data-title="Rep with the highest average score (1–10 scale)"></span></div>
+        <div id="best-score" class="score-big">-</div>
+        <div id="best-score-sub" class="subtle"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="section-title">BDR Performance Detail</h2>
+      <div class="table-wrap">
+        <table id="table">
+          <thead>
+            <tr>
+              <th>BDR</th>
+              <th>Turns</th>
+              <th>Summaries</th>
+              <th>Avg score (1–10)</th>
+              <th>Transition readiness</th>
+              <th>Coaching status</th>
+              <th>Most common question types</th>
+              <th>Top weaknesses / training needs</th>
+              <th>Most practiced scenarios</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal for BDR detail drill‑down -->
+<div id="bdr-modal">
+  <div class="modal-content">
+    <button class="close-btn" onclick="closeBdrModal()">×</button>
+    <h2 id="detail-title"></h2>
+    <!-- 2x2 grid of charts with descriptive headings -->
+    <div class="detail-grid">
+      <div>
+        <h3>Score Over Time</h3>
+        <canvas id="detailScoreChart" height="150"></canvas>
+      </div>
+      <div>
+        <h3>Transition Readiness Distribution</h3>
+        <canvas id="detailReadinessChart" height="150"></canvas>
+      </div>
+      <div>
+        <h3>Question Types Distribution</h3>
+        <canvas id="detailQuestionChart" height="150"></canvas>
+      </div>
+      <div>
+        <h3>Scenario Distribution</h3>
+        <canvas id="detailScenarioChart" height="150"></canvas>
+      </div>
+    </div>
+    <h3>Strengths</h3>
+    <div id="detail-strengths"></div>
+    <h3>Weaknesses</h3>
+    <div id="detail-weaknesses"></div>
+    <h3>Interactions</h3>
+    <div id="detail-interactions"></div>
+  </div>
+</div>
+
+<script>
+function safeNum(n){ return typeof n === 'number' && !isNaN(n) ? n : 0; }
+function scoreBadge(avg){
+  // interpret average score on a 1–10 scale
+  if(avg >= 8) return '<span class="badge-good">Strong</span>';
+  if(avg >= 6.5) return '<span class="badge-mid">Developing</span>';
+  return '<span class="badge-low">Needs Coaching</span>';
+}
+function readinessCounts(obj){
+  obj = obj || {};
+  const ready = safeNum(obj.ready);
+  const almost = safeNum(obj.almost_ready);
+  const notReady = safeNum(obj.not_ready);
+  const total = ready + almost + notReady;
+  return {ready, almost, notReady, total};
+}
+function readinessPercent(obj){
+  const c = readinessCounts(obj);
+  if(!c.total) return 0;
+  return Math.round(((c.ready + c.almost * 0.5) / c.total) * 100);
+}
+function leaderboardScore(row){
+  const avg = safeNum(row.avg_score);
+  const turns = safeNum(row.turns);
+  const readyPct = readinessPercent(row.transition_readiness);
+  const volumeBonus = Math.min(turns, 20);
+  return Math.round(avg * 0.55 + readyPct * 0.35 + volumeBonus * 0.5);
+}
+function chipForReadiness(label, count){
+  const cls = label === 'ready' ? 'chip-ready' : label === 'almost_ready' ? 'chip-almost' : 'chip-not';
+  const text = label === 'almost_ready' ? 'almost ready' : label.replace('_',' ');
+  return `<span class="chip ${cls}">${text} (${count})</span>`;
+}
+function renderPriorities(rows){
+  const box = document.getElementById('coach-priorities');
+  if(!rows.length){
+    box.innerHTML = '<div class="subtle">No coaching data yet.</div>';
+    return;
+  }
+  // Weaknesses are grouped by theme from server (themes field on each row)
+  const themeCounts = {};
+  rows.forEach(row => {
+    (row.themes || []).forEach(([theme,count]) => {
+      themeCounts[theme] = (themeCounts[theme] || 0) + count;
+    });
+  });
+  const top = Object.entries(themeCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  if(!top.length){
+    box.innerHTML = '<div class="subtle">No coaching data yet.</div>';
+    return;
+  }
+  box.innerHTML = top.map(([k,v], idx) => `
+    <div class="leader-item">
+      <div class="name-wrap"><span class="rank">${idx+1}</span><div>${k.replace(/_/g,' ')}</div></div>
+      <div>${v}</div>
+    </div>
+  `).join('');
+  document.getElementById('m-need').textContent = top[0][0].replace(/_/g,' ');
+}
+function renderLeaderboard(rows){
+  const ranked = [...rows].sort((a,b)=>leaderboardScore(b)-leaderboardScore(a));
+  const box = document.getElementById('leaderboard');
+  if(!ranked.length){
+    box.innerHTML = '<div class="subtle">No rep activity yet.</div>';
+    return;
+  }
+  box.innerHTML = ranked.map((row, idx) => `
+    <div class="leader-item">
+      <div class="name-wrap">
+        <span class="rank">${idx+1}</span>
+        <div>
+          <div><strong>${row.bdr_name}</strong></div>
+          <div class="subtle">Avg ${row.avg_score ? row.avg_score.toFixed(1) : '-'} / Ready ${readinessPercent(row.transition_readiness)}%</div>
+        </div>
+      </div>
+      <div><strong>${leaderboardScore(row)}</strong></div>
+    </div>
+  `).join('');
+
+  const bestReady = [...rows].sort((a,b)=>readinessPercent(b.transition_readiness)-readinessPercent(a.transition_readiness))[0];
+  const mostActive = [...rows].sort((a,b)=>safeNum(b.turns)-safeNum(a.turns))[0];
+  const bestScore = [...rows].sort((a,b)=>safeNum(b.avg_score)-safeNum(a.avg_score))[0];
+
+  if(bestReady){
+    document.getElementById('best-ready').textContent = bestReady.bdr_name;
+    document.getElementById('best-ready-sub').textContent = `Transition readiness ${readinessPercent(bestReady.transition_readiness)}%`;
+  }
+  if(mostActive){
+    document.getElementById('most-active').textContent = mostActive.bdr_name;
+    document.getElementById('most-active-sub').textContent = `${mostActive.turns} turns completed`;
+  }
+  if(bestScore){
+    document.getElementById('best-score').textContent = bestScore.bdr_name;
+    document.getElementById('best-score-sub').textContent = bestScore.avg_score ? `Average score ${bestScore.avg_score}/10` : '-';
+  }
+}
+async function loadData(){
+  const r = await fetch('/api/manager-data');
+  const data = await r.json();
+  const rows = data.rows || [];
+
+  document.getElementById('m-bdrs').textContent = rows.length;
+  document.getElementById('m-events').textContent = data.event_count ?? 0;
+
+  let readinessTotal = 0;
+  rows.forEach(row => readinessTotal += readinessPercent(row.transition_readiness));
+  document.getElementById('m-ready').textContent = rows.length ? `${Math.round(readinessTotal / rows.length)}%` : '-';
+
+  renderLeaderboard(rows);
+  renderPriorities(rows);
+
+  const tbody = document.querySelector('#table tbody');
+  tbody.innerHTML = '';
+  rows.forEach(row => {
+    const rc = readinessCounts(row.transition_readiness);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong><a href="#" onclick="showBdrDetail('${encodeURIComponent(row.bdr_name)}');return false;">${row.bdr_name}</a></strong></td>
+      <td>${row.turns}</td>
+      <td>${row.summaries}</td>
+      <td>${row.avg_score ? row.avg_score.toFixed(1) : '-'}<div style="margin-top:6px;">${scoreBadge(safeNum(row.avg_score))}</div></td>
+      <td>
+        ${chipForReadiness('ready', rc.ready)}
+        ${chipForReadiness('almost_ready', rc.almost)}
+        ${chipForReadiness('not_ready', rc.notReady)}
+        <div class="subtle" style="margin-top:6px;">Readiness score: ${readinessPercent(row.transition_readiness)}%</div>
+      </td>
+      <td>${scoreBadge(safeNum(row.avg_score))}</td>
+      <td>${(row.question_types || []).map(x => `<span class="chip">${x[0]} (${x[1]})</span>`).join('') || '-'}</td>
+      <td>${(row.top_weaknesses || []).map(x => `<div>${x[0]} (${x[1]})</div>`).join('') || '-'}</td>
+      <td>${(row.scenarios || []).map(x => `<div>${x[0]} (${x[1]})</div>`).join('') || '-'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  // Load charts for global scenario distribution and training themes
+  fetch('/api/scenario-distribution').then(res => res.json()).then(res => {
+    const labels = res.scenarios.map(x => x[0]);
+    const counts = res.scenarios.map(x => x[1]);
+    const ctx = document.getElementById('scenarioChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Scenarios attempted',
+          data: counts,
+          backgroundColor: '#88c2d9'
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true }
+        },
+        plugins: {
+          legend: { display: false }
+        }
+      }
+    });
+  });
+  fetch('/api/training-theme-distribution').then(res => res.json()).then(res => {
+    const labels = res.themes.map(x => x[0].replace(/_/g, ' '));
+    const counts = res.themes.map(x => x[1]);
+    const ctx2 = document.getElementById('themeChart').getContext('2d');
+    new Chart(ctx2, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Occurrences',
+          data: counts,
+          backgroundColor: '#fed58a'
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true }
+        },
+        plugins: {
+          legend: { display: false }
+        }
+      }
+    });
+  });
+}
+loadData();
+// -- BDR drill‑down modal controls and charts --
+// Chart.js instances stored globally to enable proper destruction and re‑creation
+let detailScoreChart;
+let detailReadinessChart;
+let detailQuestionChart;
+let detailScenarioChart;
+
+// Hide the BDR detail modal
+function closeBdrModal(){
+  const modal = document.getElementById('bdr-modal');
+  if(modal) modal.style.display = 'none';
+}
+
+// Show detailed analytics for a specific BDR
+async function showBdrDetail(encodedName){
+  const name = decodeURIComponent(encodedName);
+  const modal = document.getElementById('bdr-modal');
+  const titleEl = document.getElementById('detail-title');
+  if(titleEl) titleEl.textContent = name;
+  try {
+    const resp = await fetch('/api/bdr/' + encodedName);
+    const data = await resp.json();
+    // Build the score line chart
+    const scores = Array.isArray(data.scores) ? data.scores : [];
+    const scoreLabels = scores.map((_, idx) => idx + 1);
+    const scoreCtx = document.getElementById('detailScoreChart').getContext('2d');
+    if (detailScoreChart) detailScoreChart.destroy();
+    detailScoreChart = new Chart(scoreCtx, {
+      type: 'line',
+      data: {
+        labels: scoreLabels,
+        datasets: [{
+          label: 'Score',
+          data: scores,
+          backgroundColor: 'rgba(8, 63, 91, 0.1)',
+          borderColor: '#083f5b',
+          tension: 0.2
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true, min: 0, max: 10, ticks: { stepSize: 1 } }
+        },
+        plugins: { legend: { display: false } }
+      }
+    });
+    // Build readiness doughnut chart
+    const readyCounts = data.readiness || {};
+    const readyLabels = ['ready','almost_ready','not_ready'];
+    const readyData = readyLabels.map(l => readyCounts[l] || 0);
+    const readyCtx = document.getElementById('detailReadinessChart').getContext('2d');
+    if (detailReadinessChart) detailReadinessChart.destroy();
+    detailReadinessChart = new Chart(readyCtx, {
+      type: 'doughnut',
+      data: {
+        labels: readyLabels.map(l => l.replace('_',' ')),
+        datasets: [{
+          data: readyData,
+          backgroundColor: ['#DCFCE7','#FEF3C7','#FEE2E2']
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { position: 'bottom' } }
+      }
+    });
+    // Build question types bar chart
+    const qEntries = Array.isArray(data.question_types) ? data.question_types : [];
+    const qLabels = qEntries.map(x => x[0]);
+    const qCounts = qEntries.map(x => x[1]);
+    const qCtx = document.getElementById('detailQuestionChart').getContext('2d');
+    if (detailQuestionChart) detailQuestionChart.destroy();
+    detailQuestionChart = new Chart(qCtx, {
+      type: 'bar',
+      data: {
+        labels: qLabels,
+        datasets: [{
+          data: qCounts,
+          backgroundColor: '#88c2d9'
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: { y: { beginAtZero: true } },
+        plugins: { legend: { display: false } }
+      }
+    });
+    // Build scenario bar chart
+    const sEntries = Array.isArray(data.scenarios) ? data.scenarios : [];
+    const sLabels = sEntries.map(x => x[0]);
+    const sCounts = sEntries.map(x => x[1]);
+    const sCtx = document.getElementById('detailScenarioChart').getContext('2d');
+    if (detailScenarioChart) detailScenarioChart.destroy();
+    detailScenarioChart = new Chart(sCtx, {
+      type: 'bar',
+      data: {
+        labels: sLabels,
+        datasets: [{
+          data: sCounts,
+          backgroundColor: '#fed58a'
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: { y: { beginAtZero: true } },
+        plugins: { legend: { display: false } }
+      }
+    });
+    // Populate strengths list
+    const strengthsBox = document.getElementById('detail-strengths');
+    if (strengthsBox) {
+      strengthsBox.innerHTML = '';
+      (Array.isArray(data.strengths) ? data.strengths : []).forEach(entry => {
+        const text = entry[0];
+        const count = entry[1];
+        const div = document.createElement('div');
+        div.textContent = `${text} (${count})`;
+        strengthsBox.appendChild(div);
+      });
+    }
+    // Populate weaknesses list
+    const weaknessesBox = document.getElementById('detail-weaknesses');
+    if (weaknessesBox) {
+      weaknessesBox.innerHTML = '';
+      (Array.isArray(data.weaknesses) ? data.weaknesses : []).forEach(entry => {
+        const text = entry[0];
+        const count = entry[1];
+        const div = document.createElement('div');
+        div.textContent = `${text} (${count})`;
+        weaknessesBox.appendChild(div);
+      });
+    }
+
+    // Populate interactions list with scenario and response details
+    const interactionsBox = document.getElementById('detail-interactions');
+    if (interactionsBox) {
+      interactionsBox.innerHTML = '';
+      (Array.isArray(data.events) ? data.events : []).forEach(ev => {
+        const item = document.createElement('div');
+        item.className = 'interaction-item';
+        // scenario title
+        const scen = document.createElement('span');
+        scen.className = 'scenario';
+        scen.textContent = ev.scenario || 'Unknown Scenario';
+        item.appendChild(scen);
+        // response text
+        const respEl = document.createElement('span');
+        respEl.className = 'response';
+        respEl.textContent = ev.response || '';
+        item.appendChild(respEl);
+        // meta details: score, readiness, question types, strengths, weaknesses
+        const metaEl = document.createElement('span');
+        metaEl.className = 'meta';
+        const scoreTxt = typeof ev.score === 'number' ? `Score: ${ev.score.toFixed(1)}/10` : '';
+        const readinessTxt = ev.readiness ? `Readiness: ${ev.readiness.replace('_',' ')}` : '';
+        const qt = (Array.isArray(ev.question_types) && ev.question_types.length) ? `Q types: ${ev.question_types.join(', ')}` : '';
+        const strengthsTxt = (Array.isArray(ev.strengths) && ev.strengths.length) ? `Strengths: ${ev.strengths.join('; ')}` : '';
+        const weaknessesTxt = (Array.isArray(ev.weaknesses) && ev.weaknesses.length) ? `Weaknesses: ${ev.weaknesses.join('; ')}` : '';
+        metaEl.textContent = [scoreTxt, readinessTxt, qt, strengthsTxt, weaknessesTxt].filter(Boolean).join(' | ');
+        item.appendChild(metaEl);
+        interactionsBox.appendChild(item);
+      });
+    }
+    if(modal) modal.style.display = 'flex';
+  } catch (err) {
+    console.error(err);
+  }
+}
+</script>
+</body>
+</html>
